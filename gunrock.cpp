@@ -28,7 +28,7 @@ string BASEDIR = "static";
 string SCHEDALG = "FIFO";
 string LOGFILE = "/dev/null";
 
-deque <MySocket *>BUFFER;
+deque<MySocket *> BUFFER;
 pthread_mutex_t LOCK = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t ROOM_AVAILABLE = PTHREAD_COND_INITIALIZER;
 pthread_cond_t CLIENT_AVAILABLE = PTHREAD_COND_INITIALIZER;
@@ -122,19 +122,20 @@ void *runWorkerThread(void *id) {
     MySocket *client;
     while (true) {
         dthread_mutex_lock(&LOCK);
-        while(BUFFER.empty()) {
+        while (BUFFER.empty()) {
             cout << "WORKER waiting for request, id: " << tid << endl;
             dthread_cond_wait(&CLIENT_AVAILABLE, &LOCK);
         }
 
         client = BUFFER.front();
         BUFFER.pop_front();
+        dthread_cond_signal(&ROOM_AVAILABLE);
+        dthread_mutex_unlock(&LOCK);
         cout << "WORKER handling request" << endl;
         handle_request(client);
 
         cout << "WORKER signal master" << endl;
-        dthread_cond_signal(&ROOM_AVAILABLE);
-        dthread_mutex_unlock(&LOCK);
+
     }
 
 
@@ -145,7 +146,7 @@ void *runMasterThread() {
 
     // create a fixed-size pool of worker threads
     pthread_t workerThreads[THREAD_POOL_SIZE];
-    for(int i = 0; i < THREAD_POOL_SIZE; i++ ) {
+    for (int i = 0; i < THREAD_POOL_SIZE; i++) {
 //        cout << "master thread : creating worker thread, worker thread id: " << i << endl;
         int ret = dthread_create(&workerThreads[i], NULL, runWorkerThread, reinterpret_cast<void *>(i));
 
@@ -164,7 +165,7 @@ void *runMasterThread() {
         client = server->accept();
 
         dthread_mutex_lock(&LOCK);
-        while((int) BUFFER.size() == BUFFER_SIZE) {
+        while ((int) BUFFER.size() == BUFFER_SIZE) {
             cout << "MASTER waiting for room" << endl;
             dthread_cond_wait(&ROOM_AVAILABLE, &LOCK);
         }
@@ -178,7 +179,6 @@ void *runMasterThread() {
         cout << "MASTER unlocked" << endl;
     }
 }
-
 
 
 int main(int argc, char *argv[]) {
@@ -218,16 +218,14 @@ int main(int argc, char *argv[]) {
 
     services.push_back(new FileService(BASEDIR));
 
-    pthread_t workerThreads[1];
-    for(int i = 0; i < 1; i++ ) {
-//        cout << "master thread : creating worker thread, worker thread id: " << i << endl;
-        int ret = dthread_create(&workerThreads[i], NULL, reinterpret_cast<void *(*)(void *)>(runMasterThread), NULL);
+    pthread_t masterThread[1];
+    int ret = dthread_create(&masterThread[0], NULL, reinterpret_cast<void *(*)(void *)>(runMasterThread), NULL);
 
-        if (ret) {
-            cout << "Error:unable to create master thread," << ret << endl;
-            exit(-1);
-        }
+    if (ret) {
+        cout << "Error:unable to create master thread," << ret << endl;
+        exit(-1);
     }
+
 
     pthread_exit(NULL);
 
