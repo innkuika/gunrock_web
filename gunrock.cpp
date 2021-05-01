@@ -28,6 +28,11 @@ string BASEDIR = "static";
 string SCHEDALG = "FIFO";
 string LOGFILE = "/dev/null";
 
+deque <MySocket *>BUFFER;
+pthread_mutex_t LOCK = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t ROOM_AVAILABLE = PTHREAD_COND_INITIALIZER;
+pthread_cond_t CLIENT_AVAILABLE = PTHREAD_COND_INITIALIZER;
+
 vector<HttpService *> services;
 
 HttpService *find_service(HTTPRequest *request) {
@@ -114,18 +119,34 @@ void handle_request(MySocket *client) {
 void *runWorkerThread(void *id) {
     long tid = (long) id;
     cout << "Worker thread created. id: " << tid << endl;
+    MySocket *client;
+    while (true) {
+        dthread_mutex_lock(&LOCK);
+        while(BUFFER.empty()) {
+            cout << "WORKER waiting for request, id: " << tid << endl;
+            dthread_cond_wait(&CLIENT_AVAILABLE, &LOCK);
+        }
+
+        client = BUFFER.front();
+        BUFFER.pop_front();
+        cout << "WORKER handling request" << endl;
+        handle_request(client);
+
+        cout << "WORKER signal master" << endl;
+        dthread_cond_signal(&ROOM_AVAILABLE);
+        dthread_mutex_unlock(&LOCK);
+    }
 
 
-    pthread_exit(NULL);
 }
 
 void *runMasterThread() {
     cout << "Running master thread." << endl;
 
-    // TODO: master thread that create a fixed-size pool of worker threads
+    // create a fixed-size pool of worker threads
     pthread_t workerThreads[THREAD_POOL_SIZE];
     for(int i = 0; i < THREAD_POOL_SIZE; i++ ) {
-        cout << "master thread : creating worker thread, worker thread id: " << i << endl;
+//        cout << "master thread : creating worker thread, worker thread id: " << i << endl;
         int ret = dthread_create(&workerThreads[i], NULL, runWorkerThread, reinterpret_cast<void *>(i));
 
         if (ret) {
@@ -139,12 +160,23 @@ void *runMasterThread() {
     MyServerSocket *server = new MyServerSocket(PORT);
     MySocket *client;
     while (true) {
-        sync_print("waiting_to_accept", "");
+        cout << "MASTER get in client request." << endl;
         client = server->accept();
-        sync_print("client_accepted", "");
-        handle_request(client);
+
+        dthread_mutex_lock(&LOCK);
+        while((int) BUFFER.size() == BUFFER_SIZE) {
+            cout << "MASTER waiting for room" << endl;
+            dthread_cond_wait(&ROOM_AVAILABLE, &LOCK);
+        }
+
+        BUFFER.push_back(client);
+
+        cout << "MASTER signal worker" << endl;
+        dthread_cond_signal(&CLIENT_AVAILABLE);
+        dthread_mutex_unlock(&LOCK);
+
+        cout << "MASTER unlocked" << endl;
     }
-    pthread_exit(NULL);
 }
 
 
@@ -183,20 +215,26 @@ int main(int argc, char *argv[]) {
     set_log_file(LOGFILE);
 
     sync_print("init", "");
-//    MyServerSocket *server = new MyServerSocket(PORT);
-//    MySocket *client;
 
     services.push_back(new FileService(BASEDIR));
 
-    // create master thread
-//    pthread_t masterThread[1];
-//    int ret = dthread_create(&masterThread[0], NULL, reinterpret_cast<void *(*)(void *)>(runMasterThread), NULL);
-//    if (ret) {
-//        cerr << "unable to create master thread. " << ret << endl;
-//    }
+    pthread_t workerThreads[1];
+    for(int i = 0; i < 1; i++ ) {
+//        cout << "master thread : creating worker thread, worker thread id: " << i << endl;
+        int ret = dthread_create(&workerThreads[i], NULL, reinterpret_cast<void *(*)(void *)>(runMasterThread), NULL);
 
-    runMasterThread();
+        if (ret) {
+            cout << "Error:unable to create master thread," << ret << endl;
+            exit(-1);
+        }
+    }
 
+    pthread_exit(NULL);
+
+//    runMasterThread();
+
+//    MyServerSocket *server = new MyServerSocket(PORT);
+//    MySocket *client;
 //    while (true) {
 //        sync_print("waiting_to_accept", "");
 //        client = server->accept();

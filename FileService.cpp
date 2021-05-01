@@ -38,7 +38,10 @@ void FileService::get(HTTPRequest *request, HTTPResponse *response) {
   string fileContents = this->readFile(path);
   if (fileContents.size() == 0) {
     response->setStatus(404);
-  } else {
+  } else if (path.find("..") != std::string::npos){
+      response->setStatus(403);
+  }
+  else {
     if (this->endswith(path, ".css")) {
       response->setContentType("text/css");
     } else if (this->endswith(path, ".js")) {
