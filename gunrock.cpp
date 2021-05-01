@@ -116,7 +116,7 @@ void handle_request(MySocket *client) {
     delete client;
 }
 
-void *runWorkerThread(void *id) {
+_Noreturn void *runWorkerThread(void *id) {
     long tid = (long) id;
     cout << "Worker thread created. id: " << tid << endl;
     MySocket *client;
@@ -133,15 +133,12 @@ void *runWorkerThread(void *id) {
         dthread_mutex_unlock(&LOCK);
         cout << "WORKER handling request" << endl;
         handle_request(client);
-
-        cout << "WORKER signal master" << endl;
-
     }
 
 
 }
 
-void *runMasterThread() {
+_Noreturn void *runMasterThread() {
     cout << "Running master thread." << endl;
 
     // create a fixed-size pool of worker threads
@@ -154,29 +151,27 @@ void *runMasterThread() {
             cout << "Error:unable to create worker thread," << ret << endl;
             exit(-1);
         }
+        dthread_detach(reinterpret_cast<pthread_t>(&workerThreads[i]));
     }
 
 
     // TODO: master thread accepting new HTTP connections over the network and placing the descriptor for this connection into a fixed-size buffer
     MyServerSocket *server = new MyServerSocket(PORT);
     MySocket *client;
+    dthread_mutex_lock(&LOCK);
     while (true) {
-        cout << "MASTER get in client request." << endl;
-        client = server->accept();
-
-        dthread_mutex_lock(&LOCK);
         while ((int) BUFFER.size() == BUFFER_SIZE) {
             cout << "MASTER waiting for room" << endl;
             dthread_cond_wait(&ROOM_AVAILABLE, &LOCK);
         }
 
+
+        cout << "MASTER get in client request." << endl;
+        client = server->accept();
         BUFFER.push_back(client);
 
-        cout << "MASTER signal worker" << endl;
         dthread_cond_signal(&CLIENT_AVAILABLE);
         dthread_mutex_unlock(&LOCK);
-
-        cout << "MASTER unlocked" << endl;
     }
 }
 
@@ -218,16 +213,17 @@ int main(int argc, char *argv[]) {
 
     services.push_back(new FileService(BASEDIR));
 
-    pthread_t masterThread[1];
-    int ret = dthread_create(&masterThread[0], NULL, reinterpret_cast<void *(*)(void *)>(runMasterThread), NULL);
+    pthread_t masterThread;
+    int ret = dthread_create(&masterThread, NULL, reinterpret_cast<void *(*)(void *)>(runMasterThread), NULL);
 
     if (ret) {
         cout << "Error:unable to create master thread," << ret << endl;
         exit(-1);
     }
 
-
+    dthread_detach(masterThread);
     pthread_exit(NULL);
+    return 0;
 
 //    runMasterThread();
 
