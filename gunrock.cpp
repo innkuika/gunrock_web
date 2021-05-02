@@ -156,15 +156,21 @@ void *runMasterThread() {
     MyServerSocket *server = new MyServerSocket(PORT);
     MySocket *client;
     while (true) {
-        cout << "MASTER get in client request." << endl;
+//        cout << "MASTER get in client request." << endl;
+//        client = server->accept();
+        sync_print("waiting_to_accept", "");
         client = server->accept();
+        sync_print("client_accepted", "");
+
         dthread_mutex_lock(&LOCK);
 
         while ((int) BUFFER.size() == BUFFER_SIZE) {
             cout << "MASTER waiting for room" << endl;
             dthread_cond_wait(&ROOM_AVAILABLE, &LOCK);
         }
-
+//        sync_print("waiting_to_accept", "");
+//        client = server->accept();
+//        sync_print("client_accepted", "");
 
         BUFFER.push_back(client);
         dthread_cond_signal(&CLIENT_AVAILABLE);
